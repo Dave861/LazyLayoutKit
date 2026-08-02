@@ -2,7 +2,9 @@
 
 **You know `LazyVStack`, `LazyHStack` and `LazyVGrid`. Meet their cousin — the one that lets you write the layout yourself.**
 
-<!-- screenshots: hero -->
+<p align="center">
+  <img src="Docs/Images/hero-masonry.png" width="300" alt="Masonry gallery scrolled deep into 100,000 items, running at 120 fps with 48 cells materialized and a 3 µs visibility query.">
+</p>
 
 Masonry, timelines, calendars, boards. Any layout you can describe, with SwiftUI building only the views that are actually on screen.
 
@@ -56,7 +58,9 @@ public protocol LazyLayoutAlgorithm: Equatable, Sendable {
 
 Timeline is there to keep the protocol honest. Its items overlap vertically and its frames aren't monotonic in y in item order, so anything that had quietly assumed masonry's shape breaks on it. There's a test asserting exactly that.
 
-<!-- screenshots: layouts -->
+<p align="center">
+  <img src="Docs/Images/timeline.png" width="300" alt="Timeline layout: overlapping intervals split into lanes, with frames that are not monotonic in y.">
+</p>
 
 Writing your own is the point, though. Both reference layouts are around 60 and 90 lines, against the same public protocol you'd use.
 
@@ -79,7 +83,12 @@ Measured on an **iPhone 14 Pro (A16), iOS 26.5.2, Release**, running the shippin
 | Cells materialized, any depth | 54 | 54 |
 | Full re-solve on width change | 4.7–5.1 ms | — |
 
-<!-- screenshots: results -->
+<p align="center">
+  <img src="Docs/Images/result-1m.png" width="290" alt="Recorded run over 1,000,000 items: PASS, 120 fps average, 8.3 ms median, p95 and p99, 8.4 ms worst frame across 2,398 frames.">
+  <img src="Docs/Images/result-1m-details.png" width="290" alt="Same run, continued: hitch counts, peak cells materialized, and visibility query timings.">
+</p>
+
+<p align="center"><em>A recorded twenty-second run over a million items, from the demo app in this repo.</em></p>
 
 The query staying **flat from 100k to 1M on device** is the property the design exists to produce: a viewport maps to a small bucket range, then the index walks contiguous entries. Cost follows window occupancy, not collection size. A layout where most items span many buckets can still degrade to a linear scan — still correct, just not fast.
 
