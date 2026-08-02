@@ -3,7 +3,7 @@
 **You know `LazyVStack`, `LazyHStack` and `LazyVGrid`. Meet their cousin, one that lets you write the layout yourself.**
 
 <p align="center">
-  <img src="Docs/Images/hero-masonry.png" width="300" alt="Masonry gallery scrolled deep into 100,000 items, running at 120 fps with 48 cells materialized and a 3 µs visibility query.">
+  <img src="Docs/Images/hero-masonry.png" width="300" alt="Masonry gallery scrolled into the 100,000 items, running at 120 fps with 48 cells materialized and a 3 µs visibility query.">
 </p>
 
 Masonry, timelines, calendars, boards. Any layout you can describe, with SwiftUI building only the views that are actually on screen.
