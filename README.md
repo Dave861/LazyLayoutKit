@@ -1,6 +1,6 @@
 # LazyLayoutKit
 
-**You know `LazyVStack`, `LazyHStack` and `LazyVGrid`. Meet their cousin — the one that lets you write the layout yourself.**
+**You know `LazyVStack`, `LazyHStack` and `LazyVGrid`. Meet their cousin, one that lets you write the layout yourself.**
 
 <p align="center">
   <img src="Docs/Images/hero-masonry.png" width="300" alt="Masonry gallery scrolled deep into 100,000 items, running at 120 fps with 48 cells materialized and a 3 µs visibility query.">
@@ -66,13 +66,13 @@ Writing your own is the point, though. Both reference layouts are around 60 and 
 
 ## Install
 
-iOS 18 · macOS 15. Built on `ScrollGeometry` / `onScrollGeometryChange`. Nothing here needs iOS 27.
+iOS 18 · macOS 15. Built on `ScrollGeometry` / `onScrollGeometryChange`. 
 
 ```swift
 .package(url: "https://github.com/Dave861/LazyLayoutKit.git", from: "0.1.0")
 ```
 
-## How fast, actually
+## Is it fast?
 
 Measured on an **iPhone 14 Pro (A16), iOS 26.5.2, Release**, running the shipping container and index — not a prototype:
 
@@ -92,10 +92,10 @@ Measured on an **iPhone 14 Pro (A16), iOS 26.5.2, Release**, running the shippin
 
 The query staying **flat from 100k to 1M on device** is the property the design exists to produce: a viewport maps to a small bucket range, then the index walks contiguous entries. Cost follows window occupancy, not collection size. A layout where most items span many buckets can still degrade to a linear scan — still correct, just not fast.
 
-Apple's `LazyVStack` over the same 100,000 items also managed 120 fps, the same 8.34 ms p99, and zero visible hitches. Read that as *generality cost us very little against a simpler container* — not as a claim to be faster. It's one run each, over different content.
+Apple's `LazyVStack` over the same 100,000 items also managed 120 fps, the same 8.34 ms p99, and zero visible hitches. Read that as *generality cost us very little against a simpler container*, not a claim to be faster. It's one run each, over different content.
 
 <details>
-<summary><strong>Three things measuring this taught me</strong></summary>
+<summary><strong>What I learnt from measuring</strong></summary>
 
 **A desktop benchmark can't predict a phone for memory-bound work.** Building a 100,000-entry hash table costs ~1.4 ms on an M4 and **~29 ms on an A16** — 20× for identical code — while pure layout arithmetic differs by less than 2×. Only the cache-hostile random-write workload diverges like that. So this package builds no such table on any hot path: identity lookups use a sequential scan, which for the one-lookup-per-snapshot pattern anchoring actually needs is roughly **400× faster on device** than the hash table it replaced.
 
@@ -111,7 +111,7 @@ Run it yourself:
 swift run -c release LazyLayoutBenchmark 100000
 ```
 
-## What 0.1 deliberately doesn't do
+## What is not in 0.1.0
 
 Narrow beats vague. Each of these is missing because doing it properly is real work, not because it was forgotten.
 
@@ -129,7 +129,7 @@ Narrow beats vague. Each of these is missing because doing it properly is real w
 
 Items that haven't been materialized aren't in the accessibility tree, so VoiceOver can't reach them until they scroll into range.
 
-Worth stating plainly — and worth the context: **`LazyVStack` behaves identically.** Measured with an XCUITest probe over 100,000 items, this container and Apple's both put 32 elements in the tree, and both hid item 50,000. That's how virtualized containers work here; the tree refills as you scroll, including under VoiceOver's own scroll action.
+Worth stating plainly, and worth the context: **`LazyVStack` behaves identically.** Measured with an XCUITest probe over 100,000 items, this container and Apple's both put 32 elements in the tree, and both hid item 50,000. That's how virtualized containers work here; the tree refills as you scroll, including under VoiceOver's own scroll action.
 
 Widening the window while VoiceOver is running is a real improvement on that baseline and it's planned — but it isn't in 0.1, because a wider window helps nearby traversal without making 100,000 items globally reachable, and saying otherwise would be overselling it.
 
@@ -149,7 +149,7 @@ Set your own development team in Xcode, and run in **Release** — see above for
 
 Signposts under subsystem `com.lazylayoutkit`, category `layout`, with two intervals: `solve` (a full layout pass) and `visibility` (resolving the on-screen window). Add the os_signpost instrument next to Animation Hitches and they line up.
 
-Signpost names are treated as API — renaming one invalidates anyone's saved template.
+Signpost names are treated as API, renaming one invalidates anyone's saved template.
 
 ## License
 
