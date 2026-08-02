@@ -25,13 +25,13 @@ SwiftUI makes you pick one:
 
 There's nothing in between. And in between is where photo grids, feeds, calendars and boards live.
 
-This isn't an oversight on Apple's part, it's a consequence. `Layout` asks each subview how big it wants to be, and you can't ask a view that hasn't been built. Measurement-driven layout and laziness genuinely pull in opposite directions.
+This isn't an oversight on Apple's part, it's a consequence. `Layout` asks each subview how big it wants to be, and you can't ask a view that hasn't been built. Measurement-driven layout and laziness pull in opposite directions.
 
 Asked at the [WWDC26 SwiftUI Group Lab](https://developer.apple.com/videos/play/wwdc2026/8006/) whether custom layouts can be lazy, Apple's answer was: not today, `Layout` is eager-only, file a Feedback.
 
-**So this package changes the question.** Tell it your item sizes up front — an aspect ratio, a date range, a duration — and layout becomes arithmetic. Arithmetic over a million items takes milliseconds and builds nothing. Only the frames intersecting your viewport ever become views.
+**So this package takes a different approach.** Tell it your item sizes up front — an aspect ratio, a date range, a duration — and layout becomes arithmetic. Arithmetic over a million items takes milliseconds and builds nothing. Only the frames intersecting your viewport ever become views.
 
-That trade is the whole trick. It costs you content that sizes itself (self-sizing text, mainly). It buys you everything else.
+That trade is crucial. It costs you content that sizes itself (self-sizing text, mainly). It buys you everything else.
 
 ## How it works
 
@@ -74,7 +74,7 @@ iOS 18 · macOS 15. Built on `ScrollGeometry` / `onScrollGeometryChange`.
 
 ## Is it fast?
 
-Measured on an **iPhone 14 Pro (A16), iOS 26.5.2, Release**, running the shipping container and index — not a prototype:
+Measured on an **iPhone 14 Pro (A16), iOS 26.5.2, Release**, running the shipping container and index:
 
 | | 100,000 items | 1,000,000 items |
 |---|---|---|
@@ -90,7 +90,7 @@ Measured on an **iPhone 14 Pro (A16), iOS 26.5.2, Release**, running the shippin
 
 <p align="center"><em>A recorded twenty-second run over a million items, from the demo app in this repo.</em></p>
 
-The query staying **flat from 100k to 1M on device** is the property the design exists to produce: a viewport maps to a small bucket range, then the index walks contiguous entries. Cost follows window occupancy, not collection size. A layout where most items span many buckets can still degrade to a linear scan — still correct, just not fast.
+The query staying **flat from 100k to 1M on device** is the property the design exists to produce: a viewport maps to a small bucket range, then the index walks contiguous entries. Cost follows window occupancy, not collection size. A layout where most items span many buckets can still degrade to a linear scan, still correct, just not fast.
 
 Apple's `LazyVStack` over the same 100,000 items also managed 120 fps, the same 8.34 ms p99, and zero visible hitches. Read that as *generality cost us very little against a simpler container*, not a claim to be faster. It's one run each, over different content.
 
