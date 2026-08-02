@@ -1,0 +1,50 @@
+name: LazyLayoutKitDemo
+options:
+  bundleIdPrefix: dev.dave861.lazylayoutkit
+  deploymentTarget:
+    iOS: "18.0"
+  createIntermediateGroups: true
+
+packages:
+  LazyLayoutKit:
+    path: ..
+
+targets:
+  LazyLayoutKitDemo:
+    type: application
+    platform: iOS
+    sources:
+      - App
+      # The Icon Composer document, used exactly as authored.
+      - path: ../DemoAppIcon.icon
+        type: file
+    info:
+      path: App/Info.plist
+      properties:
+        CADisableMinimumFrameDurationOnPhone: true
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: true
+          UISceneConfigurations: {}
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+    dependencies:
+      - package: LazyLayoutKit
+        product: LazyLayoutKit
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.dave861.lazylayoutkit.demo
+        SWIFT_VERSION: "6.0"
+        TARGETED_DEVICE_FAMILY: "1"
+        CODE_SIGN_STYLE: Automatic
+        ASSETCATALOG_COMPILER_APPICON_NAME: DemoAppIcon
+
+schemes:
+  LazyLayoutKitDemo:
+    build:
+      targets:
+        LazyLayoutKitDemo: all
+    run:
+      config: Release

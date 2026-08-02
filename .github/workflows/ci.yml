@@ -1,0 +1,34 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  macos:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - run: swift test
+      - run: swift build -c release
+      - run: bash Scripts/check-geometry-is-framework-free.sh
+      - run: brew install swiftformat
+      - run: swiftformat --lint .
+
+  ios-build:
+    # The container itself only compiles against a UI framework, so the iOS
+    # build is a separate job rather than a flag on the macOS one.
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - run: brew install xcodegen
+      - run: cd Demo && xcodegen generate
+      - run: |
+          xcodebuild build \
+            -project Demo/LazyLayoutKitDemo.xcodeproj \
+            -scheme LazyLayoutKitDemo \
+            -destination 'generic/platform=iOS' \
+            -skipPackagePluginValidation \
+            CODE_SIGNING_ALLOWED=NO
