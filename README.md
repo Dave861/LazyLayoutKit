@@ -1,11 +1,13 @@
+# LazyLayoutKit
+
+[![CI](https://github.com/Dave861/LazyLayoutKit/actions/workflows/ci.yml/badge.svg)](https://github.com/Dave861/LazyLayoutKit/actions/workflows/ci.yml)
 [![](https://img.shields.io/endpoint?url=https%3A%2F%2Fswiftpackageindex.com%2Fapi%2Fpackages%2FDave861%2FLazyLayoutKit%2Fbadge%3Ftype%3Dswift-versions)](https://swiftpackageindex.com/Dave861/LazyLayoutKit)
 [![](https://img.shields.io/endpoint?url=https%3A%2F%2Fswiftpackageindex.com%2Fapi%2Fpackages%2FDave861%2FLazyLayoutKit%2Fbadge%3Ftype%3Dplatforms)](https://swiftpackageindex.com/Dave861/LazyLayoutKit)
-# LazyLayoutKit
 
 **You know `LazyVStack`, `LazyHStack` and `LazyVGrid`. Meet their cousin, one that lets you write the layout yourself.**
 
 <p align="center">
-  <img src="Docs/Images/hero-masonry.png" width="300" alt="Masonry gallery scrolled into the 100,000 items, running at 120 fps with 48 cells materialized and a 3 µs visibility query.">
+  <img src="Docs/Images/hero-masonry.png" width="300" alt="Masonry gallery scrolled deep into 100,000 items, running at 120 fps with 48 cells materialized and a 3 µs visibility query.">
 </p>
 
 Masonry, timelines, calendars, boards. Any layout you can describe, with SwiftUI building only the views that are actually on screen.
@@ -33,7 +35,7 @@ Asked at the [WWDC26 SwiftUI Group Lab](https://developer.apple.com/videos/play/
 
 **So this package takes a different approach.** Tell it your item sizes up front — an aspect ratio, a date range, a duration — and layout becomes arithmetic. Arithmetic over a million items takes milliseconds and builds nothing. Only the frames intersecting your viewport ever become views.
 
-That trade is crucial. It costs you content that sizes itself (self-sizing text, mainly). It buys you everything else.
+That is the trade, and it is worth being explicit about it. You give up content that sizes itself — self-sizing text, mainly. You get arbitrary geometry that stays at 120 fps whether the collection holds a thousand items or a million.
 
 ## How it works
 
@@ -64,7 +66,53 @@ Timeline is there to keep the protocol honest. Its items overlap vertically and 
   <img src="Docs/Images/timeline.png" width="300" alt="Timeline layout: overlapping intervals split into lanes, with frames that are not monotonic in y.">
 </p>
 
-Writing your own is the point, though. Both reference layouts are around 60 and 90 lines, against the same public protocol you'd use.
+Both are written against the same public protocol you would use — about 60 and 90 lines each. Writing your own is the point.
+
+## Writing your own layout
+
+Return one frame per item and a total height. That is the entire obligation.
+
+```swift
+/// Wraps chips into rows, like a tag cloud.
+struct ChipFlowLayout: LazyLayoutAlgorithm {
+    struct Chip: Equatable, Sendable {
+        var width: Double
+        var height: Double
+    }
+
+    var spacing: Double = 8
+
+    func layout(items: [Chip], containerWidth: Double) -> LazyLayoutResult {
+        var frames: [LayoutRect] = []
+        frames.reserveCapacity(items.count)
+
+        var x = 0.0, y = 0.0, rowHeight = 0.0
+        for chip in items {
+            if x > 0, x + chip.width > containerWidth {   // wrap
+                x = 0
+                y += rowHeight + spacing
+                rowHeight = 0
+            }
+            frames.append(LayoutRect(x: x, y: y, width: chip.width, height: chip.height))
+            x += chip.width + spacing
+            rowHeight = max(rowHeight, chip.height)
+        }
+        return LazyLayoutResult(frames: frames, contentHeight: y + rowHeight)
+    }
+}
+```
+
+No views, no measurement, no `GeometryReader` — just arithmetic over data you already have. Hand it to `LazyLayoutView` and it virtualizes for free:
+
+```swift
+LazyLayoutView(tags, layout: ChipFlowLayout()) { tag in
+    .init(width: tag.estimatedWidth, height: 32)
+} content: { tag in
+    TagChip(tag)
+}
+```
+
+Your frames can overlap, arrive in any order, and use negative coordinates. The visibility index assumes none of it. (This example is compiled by the test suite, so it cannot rot.)
 
 ## Install
 
@@ -125,7 +173,11 @@ Narrow beats vague. Each of these is missing because doing it properly is real w
 
 **One quirk worth knowing about masonry:** placement is a fold, so inserting an item or resizing one can change which *column* every later item lands in. Your scroll position is preserved — the container anchors on identity — but content will visibly reflow. That's masonry, not a bug. A fixed grid doesn't do it.
 
-**Overscan** is how far beyond the viewport it builds, in viewport heights, defaulting to `1`. More gives you runway during a fast fling; less cuts view construction for dense layouts or expensive cells. It's configurable precisely because the same distance can hold 50 large cards or several hundred compact timeline events.
+## Tuning overscan
+
+`overscan` is how far beyond the viewport the container builds, measured in viewport heights and defaulting to `1`. More gives you runway during a fast fling; less cuts view construction for dense layouts or expensive cells.
+
+It is a knob rather than a constant because the same distance means very different work depending on your layout: one viewport height is around 50 large cards, or several hundred compact timeline events. If a dense layout drops frames, this is the first thing to turn down.
 
 ## Accessibility
 
@@ -152,6 +204,10 @@ Set your own development team in Xcode, and run in **Release** — see above for
 Signposts under subsystem `com.lazylayoutkit`, category `layout`, with two intervals: `solve` (a full layout pass) and `visibility` (resolving the on-screen window). Add the os_signpost instrument next to Animation Hitches and they line up.
 
 Signpost names are treated as API, renaming one invalidates anyone's saved template.
+
+## Status
+
+0.1.0 is the first release. The scope is deliberately narrow and the limitations above are real, but everything inside that scope is tested and measured on device. The API may still change before 1.0 — issues and questions are welcome.
 
 ## License
 
