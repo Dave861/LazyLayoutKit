@@ -1,3 +1,5 @@
+[![](https://img.shields.io/endpoint?url=https%3A%2F%2Fswiftpackageindex.com%2Fapi%2Fpackages%2FDave861%2FLazyLayoutKit%2Fbadge%3Ftype%3Dswift-versions)](https://swiftpackageindex.com/Dave861/LazyLayoutKit)
+[![](https://img.shields.io/endpoint?url=https%3A%2F%2Fswiftpackageindex.com%2Fapi%2Fpackages%2FDave861%2FLazyLayoutKit%2Fbadge%3Ftype%3Dplatforms)](https://swiftpackageindex.com/Dave861/LazyLayoutKit)
 # LazyLayoutKit
 
 **You know `LazyVStack`, `LazyHStack` and `LazyVGrid`. Meet their cousin, one that lets you write the layout yourself.**
