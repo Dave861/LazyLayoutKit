@@ -376,7 +376,11 @@ private struct FeedScenario: View {
     let diagnostics: Diagnostics
     let isActive: Bool
 
-    @Environment(\.fontResolutionContext) private var fontContext
+    // The environment key itself is iOS 26 SDK, so it cannot merely be
+    // `@available`-gated — on an older Xcode the key path does not resolve.
+    #if compiler(>=6.2)
+        @Environment(\.fontResolutionContext) private var fontContext
+    #endif
 
     /// One measurer per style, resolved and retained in the same step.
     ///
