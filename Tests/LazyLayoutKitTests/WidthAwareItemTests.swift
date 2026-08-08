@@ -164,49 +164,51 @@
             )
         }
 
-        /// End to end: real measured text drives the layout, and the resulting
-        /// content plane reflects the measured heights rather than a placeholder.
-        @MainActor
-        func testMeasuredTextDrivesTheContentHeight() throws {
-            guard #available(macOS 26, *) else {
-                throw XCTSkip("Needs macOS 26 for the Font-to-CTFont bridge.")
-            }
-            let data = rows(300)
-            let context = EnvironmentValues().fontResolutionContext
-            let measurer = TextMeasurer(TextStyle(font: .body, in: context, lineLimit: 3))
-            let built = Box<Set<Int>>([])
+        #if compiler(>=6.2)
+            /// End to end: real measured text drives the layout, and the resulting
+            /// content plane reflects the measured heights rather than a placeholder.
+            @MainActor
+            func testMeasuredTextDrivesTheContentHeight() throws {
+                guard #available(macOS 26, *) else {
+                    throw XCTSkip("Needs macOS 26 for the Font-to-CTFont bridge.")
+                }
+                let data = rows(300)
+                let context = EnvironmentValues().fontResolutionContext
+                let measurer = TextMeasurer(TextStyle(font: .body, in: context, lineLimit: 3))
+                let built = Box<Set<Int>>([])
 
-            let view = LazyLayoutView(
-                data,
-                layout: MasonryLayout(columns: 1, spacing: 8),
-                recomputeOn: measurer.style
-            ) { row, width in
-                .fixedHeight(measurer.height(of: row.text, width: width))
-            } content: { row in
-                Text(row.text)
-                    .font(.body)
-                    .lineLimit(3)
-                    .onAppear { built.value.insert(row.id) }
-            }
+                let view = LazyLayoutView(
+                    data,
+                    layout: MasonryLayout(columns: 1, spacing: 8),
+                    recomputeOn: measurer.style
+                ) { row, width in
+                    .fixedHeight(measurer.height(of: row.text, width: width))
+                } content: { row in
+                    Text(row.text)
+                        .font(.body)
+                        .lineLimit(3)
+                        .onAppear { built.value.insert(row.id) }
+                }
 
-            let (window, satisfied) = host(view, size: NSSize(width: 400, height: 700)) {
-                !built.value.isEmpty
-            }
-            defer { window.close() }
-            XCTAssertTrue(satisfied, "No cells were built.")
+                let (window, satisfied) = host(view, size: NSSize(width: 400, height: 700)) {
+                    !built.value.isEmpty
+                }
+                defer { window.close() }
+                XCTAssertTrue(satisfied, "No cells were built.")
 
-            // Only a window's worth of cells, not all 300 — the point of the
-            // container is that measured text stays lazy.
-            XCTAssertLessThan(built.value.count, 300)
+                // Only a window's worth of cells, not all 300 — the point of the
+                // container is that measured text stays lazy.
+                XCTAssertLessThan(built.value.count, 300)
 
-            // Every measured height must be a real, positive, finite number: a
-            // zero would collapse the cell and a NaN would poison the layout.
-            for row in data {
-                let height = measurer.height(of: row.text, width: 384)
-                XCTAssertTrue(height.isFinite)
-                XCTAssertGreaterThan(height, 0)
+                // Every measured height must be a real, positive, finite number: a
+                // zero would collapse the cell and a NaN would poison the layout.
+                for row in data {
+                    let height = measurer.height(of: row.text, width: 384)
+                    XCTAssertTrue(height.isFinite)
+                    XCTAssertGreaterThan(height, 0)
+                }
             }
-        }
+        #endif
 
         /// The 0.1 initializer must keep working unchanged alongside the new one.
         @MainActor

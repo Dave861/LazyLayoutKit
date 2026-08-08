@@ -41,6 +41,12 @@ parent render — and the cache is worth ~65x. `recomputeOn:` tells the containe
 that the style is a dependency it cannot otherwise see, so a Dynamic Type change
 re-solves instead of leaving every cell at a height measured for the old font.
 
+> Note: The `Font` bridge requires **Xcode 26** to build — `Font.Resolved` is an
+> iOS 26 SDK symbol, and availability annotations cannot conjure a symbol the SDK
+> does not have. On an older toolchain ``TextMeasurer`` and the `CTFont`
+> initializer work unchanged; only ``TextStyle`` initializer taking a `Font` is
+> absent.
+
 ## Matching what SwiftUI renders
 
 The measurement is only useful if it agrees with the view. Two things make that

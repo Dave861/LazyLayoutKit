@@ -143,7 +143,10 @@ Your frames can overlap, arrive in any order, and use negative coordinates. The 
 
 ## Install
 
-iOS 18 · macOS 15. Built on `ScrollGeometry` / `onScrollGeometryChange`. 
+iOS 18 · macOS 15. Built on `ScrollGeometry` / `onScrollGeometryChange`.
+
+Builds with any Xcode from 16 onwards. **`TextStyle(font:in:)` — the SwiftUI `Font` bridge — needs Xcode 26**, because `Font.Resolved` is an iOS 26 SDK API and `@available` cannot conjure a symbol the SDK does not have. On an older toolchain that one initializer is absent and everything else, `TextMeasurer` included, works as documented: you resolve the `CTFont` yourself, which is what everyone did before `Font.Resolved` existed.
+
 
 ```swift
 .package(url: "https://github.com/Dave861/LazyLayoutKit.git", from: "0.2.0")

@@ -389,11 +389,15 @@ private struct FeedScenario: View {
     @State private var captionMeasurers = TextMeasurerStore()
 
     private var captionStyle: TextStyle {
-        if #available(iOS 26, *) {
-            TextStyle(font: .caption.weight(.semibold), in: fontContext, lineLimit: 1)
-        } else {
+        #if compiler(>=6.2)
+            if #available(iOS 26, *) {
+                TextStyle(font: .caption.weight(.semibold), in: fontContext, lineLimit: 1)
+            } else {
+                TextStyle(font: UIFont.preferredFont(forTextStyle: .caption1), lineLimit: 1)
+            }
+        #else
             TextStyle(font: UIFont.preferredFont(forTextStyle: .caption1), lineLimit: 1)
-        }
+        #endif
     }
 
     private var style: TextStyle {
@@ -403,11 +407,15 @@ private struct FeedScenario: View {
         // Dynamic Type — `preferredFont(forTextStyle:)` resolves against the
         // current content size category — it just cannot see anything
         // SwiftUI-specific about the font.
-        if #available(iOS 26, *) {
-            TextStyle(font: .body, in: fontContext, lineLimit: 3)
-        } else {
+        #if compiler(>=6.2)
+            if #available(iOS 26, *) {
+                TextStyle(font: .body, in: fontContext, lineLimit: 3)
+            } else {
+                TextStyle(font: UIFont.preferredFont(forTextStyle: .body), lineLimit: 3)
+            }
+        #else
             TextStyle(font: UIFont.preferredFont(forTextStyle: .body), lineLimit: 3)
-        }
+        #endif
     }
 
     var body: some View {

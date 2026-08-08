@@ -21,6 +21,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   to the concrete font it will render as, via `Font.Resolved` (iOS 26 / macOS 26).
   This carries Dynamic Type through to measurement. The package floor stays at
   iOS 18 / macOS 15; the core measurer takes a `CTFont` and works there.
+
+  **This one initializer requires Xcode 26 to build.** `Font.Resolved` is an
+  iOS 26 SDK symbol, and `@available` gates runtime rather than whether a symbol
+  exists to compile against, so it is behind `#if compiler(>=6.2)`. On Xcode 16
+  the package still builds and `TextMeasurer` still works; only the `Font`
+  convenience is absent.
 - A width-aware initializer on `LazyLayoutView`, taking
   `item: (Element, Double) -> Layout.Item` and a required `recomputeOn:`
   dependency. The closure runs at solve time, when the container width is known,
