@@ -10,6 +10,9 @@ struct ScenarioView: View {
     let model: DemoModel
     let diagnostics: Diagnostics
     let runner: BenchmarkRunner
+    /// Whether this scenario's tab is the one on screen. Only the visible
+    /// scenario reports instrumentation; see `DemoApp`.
+    var isActive = true
 
     var body: some View {
         NavigationStack {
@@ -26,31 +29,46 @@ struct ScenarioView: View {
     @ViewBuilder
     private var container: some View {
         switch mode {
+        case .feed:
+            FeedScenario(model: model, diagnostics: diagnostics, isActive: isActive)
+                .padding(.horizontal, 12)
+                .frame(maxWidth: model.isNarrowed ? 260 : .infinity)
+                .id(scenarioIdentity)
         case .timeline:
             LazyLayoutView(
                 model.items,
                 id: \.id,
                 layout: model.timeline,
-                overscan: model.overscan,
+                overscan: model.overscan.resolved,
                 item: { $0.interval },
-                onInstrumentation: { diagnostics.record($0) }
+                onInstrumentation: {
+                    if isActive {
+                        diagnostics.record($0)
+                    }
+                }
             ) { item in
                 DemoCell(index: item.id, compact: true)
             }
             .padding(.horizontal, 12)
+            .frame(maxWidth: model.isNarrowed ? 260 : .infinity)
             .id(scenarioIdentity)
         default:
             LazyLayoutView(
                 model.items,
                 id: \.id,
                 layout: model.masonry,
-                overscan: model.overscan,
+                overscan: model.overscan.resolved,
                 item: { $0.metric },
-                onInstrumentation: { diagnostics.record($0) }
+                onInstrumentation: {
+                    if isActive {
+                        diagnostics.record($0)
+                    }
+                }
             ) { item in
                 DemoCell(index: item.id)
             }
             .padding(.horizontal, 12)
+            .frame(maxWidth: model.isNarrowed ? 260 : .infinity)
             .id(scenarioIdentity)
         }
     }
@@ -58,7 +76,10 @@ struct ScenarioView: View {
     /// Re-create the container when the dataset changes, so one run can never
     /// inherit another's scroll position.
     private var scenarioIdentity: String {
-        "\(mode.rawValue)-\(model.count.rawValue)-\(model.generation)-\(model.overscan)"
+        """
+        \(mode.rawValue)-\(model.count.rawValue)-\(model.generation)\
+        -\(model.overscan.label)-\(model.textCacheGeneration)
+        """
     }
 
     @ToolbarContentBuilder
@@ -69,7 +90,9 @@ struct ScenarioView: View {
                     get: { model.count },
                     set: { model.count = $0 }
                 )) {
-                    ForEach(ItemCount.allCases) { count in
+                    // Feed stops at 100K: a million measured strings is
+                    // minutes of CoreText, not a configuration worth offering.
+                    ForEach(ItemCount.available(for: mode)) { count in
                         Text(count.description).tag(count)
                     }
                 }
@@ -93,15 +116,45 @@ struct ScenarioView: View {
                         model.insertAtFront()
                     }
                 }
+                Section("Device protocol") {
+                    if mode == .feed {
+                        // Warm: re-solve with the measurement cache intact.
+                        Button("Force re-solve (warm)", systemImage: "arrow.clockwise") {
+                            model.forceFeedResolve()
+                        }
+                        // Cold: rebuild the scenario and its cache first.
+                        Button("Clear text cache (cold)", systemImage: "snowflake") {
+                            model.clearTextCacheAndResolve()
+                        }
+                    }
+                    // T5: a width change that is not a rotation. Rotation also
+                    // relays out the whole hierarchy, which would mask the
+                    // scroll-view width deadlock rather than test it.
+                    Toggle(isOn: Binding(
+                        get: { model.isNarrowed },
+                        set: { model.isNarrowed = $0 }
+                    )) {
+                        Label("Narrow to 260pt", systemImage: "arrow.right.and.line.vertical.and.arrow.left")
+                    }
+                    if mode == .feed {
+                        // T3: one ~10 kB string, to see whether a single item
+                        // can stall a frame.
+                        Button("Insert 10 kB string", systemImage: "doc.text.below.ecg") {
+                            model.insertPathologicalString()
+                        }
+                        Button("Clear inserted", systemImage: "trash") {
+                            model.clearInsertedItems()
+                        }
+                    }
+                }
                 Section("Overscan") {
                     Picker("Overscan", selection: Binding(
                         get: { model.overscan },
                         set: { model.overscan = $0 }
                     )) {
-                        Text("0.25 screens").tag(0.25)
-                        Text("0.5 screens").tag(0.5)
-                        Text("1 screen").tag(1.0)
-                        Text("2 screens").tag(2.0)
+                        ForEach(DemoModel.OverscanChoice.allCases) { choice in
+                            Text(choice.label).tag(choice)
+                        }
                     }
                 }
                 Section {
@@ -304,5 +357,160 @@ struct EagerMasonryView<CellView: View>: View {
             guard width > 0 else { return }
             result = layout.layout(items: items.map(\.metric), containerWidth: width)
         }
+    }
+}
+
+/// Self-sizing text, on device.
+///
+/// This is the scenario the 0.2 performance claims are measured against: heights
+/// come from ``TextMeasurer`` at solve time rather than from the data, so the
+/// solve interval in the HUD now includes measurement.
+///
+/// It is a separate view rather than another branch of `ScenarioView.container`
+/// because it needs `@Environment(\.fontResolutionContext)` and a measurer whose
+/// lifetime follows it. Reading the context here is also what makes the scenario
+/// re-measure when Dynamic Type changes — the context is `Equatable`, so a text
+/// size change rebuilds the measurer and the container re-solves.
+private struct FeedScenario: View {
+    let model: DemoModel
+    let diagnostics: Diagnostics
+    let isActive: Bool
+
+    @Environment(\.fontResolutionContext) private var fontContext
+
+    /// One measurer per style, resolved and retained in the same step.
+    ///
+    /// Building it in `body` would discard the cache on every parent render, and
+    /// the `.task`-stores-it variant is worse than it looks: `body` runs first,
+    /// so the frame after a style change uses a measurer built and thrown away
+    /// on the spot while a *different* instance gets stored with an empty cache.
+    /// `TextMeasurerStore` hands back the instance it keeps.
+    @State private var measurers = TextMeasurerStore()
+    @State private var captionMeasurers = TextMeasurerStore()
+
+    private var captionStyle: TextStyle {
+        if #available(iOS 26, *) {
+            TextStyle(font: .caption.weight(.semibold), in: fontContext, lineLimit: 1)
+        } else {
+            TextStyle(font: UIFont.preferredFont(forTextStyle: .caption1), lineLimit: 1)
+        }
+    }
+
+    private var style: TextStyle {
+        // Both paths, because the package supports both. The SwiftUI `Font`
+        // bridge needs iOS 26; below that the measurer takes a `CTFont` directly
+        // and `UIFont` is toll-free bridged to one. The iOS 18 path still tracks
+        // Dynamic Type — `preferredFont(forTextStyle:)` resolves against the
+        // current content size category — it just cannot see anything
+        // SwiftUI-specific about the font.
+        if #available(iOS 26, *) {
+            TextStyle(font: .body, in: fontContext, lineLimit: 3)
+        } else {
+            TextStyle(font: UIFont.preferredFont(forTextStyle: .body), lineLimit: 3)
+        }
+    }
+
+    var body: some View {
+        let style = style
+        let measurer = measurers.measurer(for: style)
+        // The caption scales with Dynamic Type too, so it is measured rather
+        // than assumed. A constant here is what clipped the body text at
+        // accessibility sizes.
+        let captionStyle = captionStyle
+        // A representative caption at a representative width. The id is the
+        // widest part, so measure with a large one rather than "Item 0".
+        let captionHeight = captionMeasurers
+            .measurer(for: captionStyle)
+            .height(of: "Item 000,000", width: 200)
+        return LazyLayoutView(
+            model.feedItems,
+            id: \.id,
+            layout: model.feedLayout,
+            overscan: model.overscan.resolved,
+            // Without this the container watches only the collection, and a
+            // Dynamic Type change would leave every cell at a height measured
+            // for the old font.
+            // Both styles matter: either one changing invalidates every height.
+            recomputeOn: FeedResolveKey(
+                style: style,
+                captionStyle: captionStyle,
+                revision: model.feedRevision
+            ),
+            item: { item, width in
+                .fixedHeight(FeedCell.height(
+                    measuring: item.body,
+                    width: width,
+                    with: measurer,
+                    captionHeight: captionHeight
+                ))
+            },
+            onInstrumentation: {
+                if isActive {
+                    diagnostics.record($0)
+                }
+            }
+        ) { item in
+            FeedCell(item: item, captionHeight: captionHeight)
+        }
+    }
+}
+
+/// Everything outside the collection that changes a Feed height.
+private struct FeedResolveKey: Equatable {
+    let style: TextStyle
+    let captionStyle: TextStyle
+    let revision: Int
+}
+
+private struct FeedCell: View {
+    private static let padding: Double = 12
+    private static let spacing: Double = 6
+
+    let item: FeedItem
+    /// Measured, not assumed: `.caption` grows with Dynamic Type like anything
+    /// else, and pinning it to a constant clips the body text at large sizes.
+    let captionHeight: Double
+
+    /// The cell's total height, and the single definition of it.
+    ///
+    /// The layout input goes through here and the view fills whatever frame that
+    /// produces, so the two cannot drift apart. Nothing inside sizes itself: the
+    /// caption is pinned, and the body text takes exactly the space left over,
+    /// which by construction is the height that was measured for it.
+    ///
+    /// A loose "chrome" constant plus self-sizing content is the version of this
+    /// that silently overlaps cells as soon as the font or the padding changes.
+    static func height(
+        measuring text: String,
+        width: Double,
+        with measurer: TextMeasurer,
+        captionHeight: Double
+    ) -> Double {
+        // The text is inset by the cell's own horizontal padding, so it has to be
+        // measured at the width it will actually wrap at, not the cell's width.
+        let textWidth = max(1, width - padding * 2)
+        return measurer.height(of: text, width: textWidth)
+            + captionHeight + spacing + padding * 2
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Self.spacing) {
+            Text("Item \(item.id.formatted())")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                // Measured as a single line, so it has to render as one. Without
+                // this, "Item 52,096" at an accessibility text size wraps to two
+                // lines, overflows the frame it was given, and pushes the body
+                // text out of the cell — which reads as the body being clipped.
+                .lineLimit(1)
+                .frame(height: captionHeight, alignment: .leading)
+            Text(item.body)
+                .font(.body)
+                .lineLimit(3)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        }
+        .padding(Self.padding)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(.quaternary.opacity(0.35), in: .rect(cornerRadius: 12))
     }
 }

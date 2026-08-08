@@ -39,6 +39,7 @@ final class Diagnostics {
     var hitches8 = 0
     var hitches17 = 0
 
+    var lastItemsMs: Double = 0
     var lastTotalSolveMs: Double = 0
     var lastLayoutMs: Double = 0
     var lastSnapshotMs: Double = 0
@@ -68,7 +69,7 @@ final class Diagnostics {
     @ObservationIgnored private var deepestIndex = 0
     @ObservationIgnored private var scrollLow = Double.infinity
     @ObservationIgnored private var scrollHigh = -Double.infinity
-    @ObservationIgnored private var pendingSolve: (layout: Double, snapshot: Double, total: Double)?
+    @ObservationIgnored private var pendingSolve: (items: Double, layout: Double, snapshot: Double, total: Double)?
     @ObservationIgnored private var pendingSolveCount = 0
 
     var isCapturing: Bool {
@@ -85,6 +86,7 @@ final class Diagnostics {
         medianMs = 0
         hitches8 = 0
         hitches17 = 0
+        lastItemsMs = 0
         solveCount = 0
     }
 
@@ -118,6 +120,7 @@ final class Diagnostics {
         // Publish once, now that the run is closed.
         publishLiveValues()
         if let pendingSolve {
+            lastItemsMs = pendingSolve.items
             lastLayoutMs = pendingSolve.layout
             lastSnapshotMs = pendingSolve.snapshot
             lastTotalSolveMs = pendingSolve.total
@@ -148,6 +151,7 @@ final class Diagnostics {
                 : capturedQueries.reduce(0, +) / Double(capturedQueries.count),
             peakQueryUs: capturedQueries.max() ?? 0,
             lastSolveMs: pendingSolve?.total ?? lastTotalSolveMs,
+            lastItemsMs: pendingSolve?.items ?? lastItemsMs,
             solves: pendingSolveCount
         )
     }
@@ -201,11 +205,15 @@ final class Diagnostics {
     /// fires on every visibility change, which is per-frame in practice.
     func record(_ event: LazyLayoutInstrumentationEvent) {
         switch event {
-        case let .solve(layout, snapshot, total):
+        case let .solve(items, layout, snapshot, total):
             if capturing {
-                pendingSolve = (layout.milliseconds, snapshot.milliseconds, total.milliseconds)
+                pendingSolve = (
+                    items.milliseconds, layout.milliseconds,
+                    snapshot.milliseconds, total.milliseconds
+                )
                 pendingSolveCount += 1
             } else {
+                lastItemsMs = items.milliseconds
                 lastLayoutMs = layout.milliseconds
                 lastSnapshotMs = snapshot.milliseconds
                 lastTotalSolveMs = total.milliseconds

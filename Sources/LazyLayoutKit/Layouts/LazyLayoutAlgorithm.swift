@@ -45,11 +45,18 @@ public struct LazyLayoutResult: Equatable, Sendable {
 
 /// Layout input for algorithms that place items by height alone.
 ///
-/// 0.1 supports only metrics the caller already knows. There is deliberately no
-/// `.estimated` or `.measured` case: those names imply a measure-and-correct
-/// lifecycle this version does not implement, and shipping the name without the
-/// behaviour would be worse than not shipping it. Content whose height is only
-/// known after it is built is not supported yet.
+/// There is deliberately no `.estimated` or `.measured` case. Those names imply
+/// a measure-and-correct lifecycle — build a view, observe what it wanted, then
+/// correct the layout and the scroll offset — which this package does not
+/// implement and is not planning to.
+///
+/// Self-sizing text does not change that. `TextMeasurer` computes a height from
+/// the string, the font and the width before any view exists, so the caller still
+/// passes a `.fixedHeight`; the number was simply computed rather than known in
+/// advance. From here the distinction is invisible, which is the point.
+///
+/// What remains unsupported is content whose height is genuinely only knowable
+/// after it has been built.
 public enum ItemMetric: Hashable, Sendable {
     /// width ÷ height. Height is derived from whatever column width the layout
     /// assigns.

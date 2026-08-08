@@ -24,12 +24,12 @@
 ///
 /// An item spanning many buckets would otherwise be duplicated into every one of
 /// them, which makes worst-case memory quadratic for tall or sparse content. Any
-/// item spanning more than ``maxBucketSpan`` buckets is instead put in
-/// ``oversized`` and tested on every query. In normal layouts that list is
+/// item spanning more than `maxBucketSpan` buckets is instead put in
+/// `oversized` and tested on every query. In normal layouts that list is
 /// empty or tiny. A pathological layout where most items are oversized degrades
 /// the query to a linear scan — correct, just not fast.
 public struct VerticalVisibilityIndex: Sendable {
-    /// Above this many buckets, an item goes in ``oversized`` instead of being
+    /// Above this many buckets, an item goes in `oversized` instead of being
     /// duplicated. 8 is a guess that keeps duplication bounded without pushing
     /// ordinary tall cells onto the linear path; it is not tuned.
     static let maxBucketSpan = 8

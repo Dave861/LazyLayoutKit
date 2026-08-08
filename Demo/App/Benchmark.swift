@@ -31,7 +31,24 @@ struct BenchmarkResult: Identifiable, Sendable {
     let averageQueryUs: Double
     let peakQueryUs: Double
     let lastSolveMs: Double
+    /// Item-resolution component of the last solve. For measured text this is
+    /// the cold-cache cost, and it is the number the text ceiling rests on.
+    let lastItemsMs: Double
     let solves: Int
+
+    /// Hitch counts normalised by distance travelled.
+    ///
+    /// A 20-second window records whatever distance the tester happened to
+    /// fling, so raw counts are not comparable between runs — and the 0.1
+    /// baseline recorded no distance at all, which is why comparing against its
+    /// 26 hitches was never sound. These make two runs comparable.
+    var hitchesPer100k: Double {
+        scrolledPoints > 0 ? Double(hitches17) / (scrolledPoints / 100_000) : 0
+    }
+
+    var longFramesPer100k: Double {
+        scrolledPoints > 0 ? Double(hitches8) / (scrolledPoints / 100_000) : 0
+    }
 
     var passed: Bool {
         hitches17 == 0 && p99Ms <= 8.4 && peakCells < 600
@@ -71,6 +88,9 @@ struct BenchmarkResult: Identifiable, Sendable {
         query avg    \(f(averageQueryUs, 1)) µs
         query peak   \(f(peakQueryUs, 1)) µs
         last solve   \(f(lastSolveMs, 2)) ms (×\(solves))
+        └ items      \(f(lastItemsMs, 2)) ms
+
+        per 100k pt  \(f(hitchesPer100k, 1)) hitches >16.7, \(f(longFramesPer100k, 1)) >8.3
 
         verdict      \(passed ? "PASS" : "REVIEW")
         """

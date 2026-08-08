@@ -8,7 +8,7 @@ struct DemoApp: App {
 }
 
 enum AppTab: Hashable {
-    case gallery, timeline, baselines, results
+    case gallery, timeline, feed, baselines, results
 }
 
 struct RootView: View {
@@ -25,7 +25,11 @@ struct RootView: View {
                     mode: .masonry,
                     model: model,
                     diagnostics: diagnostics,
-                    runner: runner
+                    runner: runner,
+                    // TabView keeps every tab alive, so a scenario that is not on
+                    // screen still solves — and without this its numbers land in
+                    // the shared diagnostics and are read as the visible tab's.
+                    isActive: tab == .gallery
                 )
             }
 
@@ -35,8 +39,33 @@ struct RootView: View {
                     mode: .timeline,
                     model: model,
                     diagnostics: diagnostics,
-                    runner: runner
+                    runner: runner,
+                    // TabView keeps every tab alive, so a scenario that is not on
+                    // screen still solves — and without this its numbers land in
+                    // the shared diagnostics and are read as the visible tab's.
+                    isActive: tab == .timeline
                 )
+            }
+
+            Tab("Feed", systemImage: "text.alignleft", value: .feed) {
+                // Built only while it is the visible tab.
+                //
+                // `TabView` keeps tabs alive, and a hidden Feed does not merely
+                // report misleading numbers — it *solves*, which measures every
+                // string and warms the cache. The first reading after switching
+                // to the tab was then a warm one labelled cold. Constructing it
+                // on demand means entering the tab is always a genuine cold pass.
+                if tab == .feed {
+                    ScenarioView(
+                        title: "Feed",
+                        mode: .feed,
+                        model: model,
+                        diagnostics: diagnostics,
+                        runner: runner
+                    )
+                } else {
+                    Color.clear
+                }
             }
 
             Tab("Baselines", systemImage: "chart.bar.xaxis", value: .baselines) {

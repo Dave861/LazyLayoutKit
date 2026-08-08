@@ -5,7 +5,11 @@ import SwiftUI
 /// The SPI keeps diagnostics out of the supported 0.1 API surface.
 @_spi(Instrumentation)
 public enum LazyLayoutInstrumentationEvent: Sendable {
-    case solve(layout: Duration, snapshot: Duration, total: Duration)
+    case solve(items: Duration, layout: Duration, snapshot: Duration, total: Duration)
+    /// Time to decide what to build: resolving the overscan window *and* querying
+    /// it. The two are reported together because an `Overscan/items(_:)` budget
+    /// resolves its window by bisection — about a dozen visibility queries — and
+    /// timing only the final lookup would report a fraction of the real cost.
     case visibility(duration: Duration, count: Int, first: Int?, last: Int?)
     case viewport(offsetY: Double)
 }
@@ -21,29 +25,111 @@ public enum LazyLayoutInstrumentationEvent: Sendable {
 /// }
 /// ```
 ///
-/// ## What it does not do in 0.1
+/// Sizes are still known before any view exists — that is what makes
+/// virtualization possible. For content whose size depends on the width, such as
+/// text, use the width-aware initializer, which defers the item mapping to solve
+/// time and pairs with ``TextMeasurer``:
+///
+/// ```swift
+/// @State private var measurers = TextMeasurerStore()
+/// // ...
+/// let style = TextStyle(font: .body, in: fontContext, lineLimit: 3)
+/// let measurer = measurers.measurer(for: style)
+///
+/// LazyLayoutView(posts, layout: MasonryLayout(columns: 1), recomputeOn: style) { post, width in
+///     .fixedHeight(measurer.height(of: post.body, width: width))
+/// } content: { post in
+///     Text(post.body).lineLimit(3)
+/// }
+/// ```
+///
+/// ## What it still does not do
 ///
 /// - Scrolls **vertically** only. A layout may place items anywhere across the
 ///   container's width; the scroll axis and the visibility index are y.
-/// - Item sizes must be known before a view exists. There is no measurement pass.
+/// - There is no measure-and-correct pass. Sizes are computed before layout, not
+///   observed from rendered views and reconciled afterwards.
 /// - Collection changes are applied **correctly but without animation**. Scroll
 ///   position is preserved by anchoring on a stable id; insertion and removal do
 ///   not animate.
 ///
 /// ## Cost note
 ///
-/// `init` maps the collection once to extract ids and layout inputs, so creating
-/// this view is O(n) in the number of items. That happens when the *parent*
-/// re-renders, not while scrolling — scrolling only re-runs `body`, which
-/// iterates the on-screen window.
+/// `init` maps the collection once to extract ids, so creating this view is O(n)
+/// in the number of items. That happens when the *parent* re-renders, not while
+/// scrolling — scrolling only re-runs `body`, which iterates the on-screen window.
+/// The width-aware initializer additionally runs its item closure for every
+/// element on each width change; see its documentation for what that costs with
+/// measured text.
 public struct LazyLayoutView<Element, ID: Hashable & Sendable, Layout: LazyLayoutAlgorithm, Cell: View>: View {
     private let elements: [Element]
     private let ids: [ID]
-    private let items: [Layout.Item]
+    private let items: ItemSource
+    private let changeToken: ChangeToken
     private let layout: Layout
-    private let overscan: Double
+    private let overscan: Overscan
     private let content: (Element) -> Cell
     private let onInstrumentation: ((LazyLayoutInstrumentationEvent) -> Void)?
+
+    /// Where each item's layout input comes from.
+    ///
+    /// Most layout inputs — an aspect ratio, a date range — are properties of the
+    /// element and can be extracted once. Text is not: its height depends on the
+    /// width it will be laid out in, which does not exist until the container has
+    /// been measured. So the width-aware case defers the mapping to solve time,
+    /// when the width is known.
+    private enum ItemSource {
+        case fixed([Layout.Item])
+        case widthAware((Element, Double) -> Layout.Item)
+
+        func resolve(for elements: [Element], containerWidth: Double) -> [Layout.Item] {
+            switch self {
+            case let .fixed(items): items
+            case let .widthAware(make): elements.map { make($0, containerWidth) }
+            }
+        }
+    }
+
+    /// What the container watches to know a re-solve is needed.
+    ///
+    /// The fixed path can watch the mapped items directly. The width-aware path
+    /// cannot — the items do not exist at `body` time, and computing them there to
+    /// compare would run the item closure for the whole collection on every frame,
+    /// which for text means measuring it. So it watches the elements instead,
+    /// which is the thing the items are derived from. That is why the width-aware
+    /// initializer requires `Element: Equatable`.
+    ///
+    /// The payload is type-erased because the two paths compare different types,
+    /// and `onChange(of:)` needs one `Equatable` value.
+    private struct ChangeToken: Equatable {
+        let ids: [ID]
+        let payload: AnyEquatable
+        let layout: Layout
+    }
+
+    /// The width-aware path's change payload: the elements the items derive
+    /// from, plus whatever the caller declared as an outside dependency.
+    private struct ElementsAndTrigger<E: Equatable, Trigger: Equatable>: Equatable {
+        let elements: [E]
+        let trigger: Trigger
+    }
+
+    private struct AnyEquatable: Equatable {
+        private let value: Any
+        private let isEqual: (Any) -> Bool
+
+        init<Wrapped: Equatable>(_ value: Wrapped) {
+            self.value = value
+            isEqual = { other in
+                guard let other = other as? Wrapped else { return false }
+                return other == value
+            }
+        }
+
+        static func == (lhs: AnyEquatable, rhs: AnyEquatable) -> Bool {
+            lhs.isEqual(rhs.value)
+        }
+    }
 
     @State private var snapshot: LayoutSnapshot<ID>?
     @State private var containerWidth: Double = 0
@@ -51,13 +137,6 @@ public struct LazyLayoutView<Element, ID: Hashable & Sendable, Layout: LazyLayou
     @State private var placed: [Placed] = []
     @State private var scrollPosition = ScrollPosition(idType: ID.self)
     @State private var hasWarnedAboutDuplicates = false
-
-    /// Everything a re-solve depends on, so one mutation triggers one solve.
-    private struct ResolutionInput: Equatable {
-        let ids: [ID]
-        let items: [Layout.Item]
-        let layout: Layout
-    }
 
     private struct Placed: Identifiable {
         let id: ID
@@ -86,16 +165,115 @@ public struct LazyLayoutView<Element, ID: Hashable & Sendable, Layout: LazyLayou
         _ data: Data,
         id: KeyPath<Element, ID>,
         layout: Layout,
-        overscan: Double = 1,
+        overscan: Overscan = .default,
         item: (Element) -> Layout.Item,
         @ViewBuilder content: @escaping (Element) -> Cell
     ) where Data.Element == Element {
         let elements = Array(data)
+        let mapped = elements.map(item)
         self.elements = elements
         ids = elements.map { $0[keyPath: id] }
-        items = elements.map(item)
+        items = .fixed(mapped)
+        changeToken = ChangeToken(
+            ids: elements.map { $0[keyPath: id] },
+            payload: AnyEquatable(mapped),
+            layout: layout
+        )
         self.layout = layout
-        self.overscan = max(0, overscan)
+        self.overscan = overscan
+        self.content = content
+        onInstrumentation = nil
+    }
+
+    /// Creates a container whose item sizes depend on the width they'll be laid
+    /// out in — self-sizing text, most of all.
+    ///
+    /// The difference from ``init(_:id:layout:overscan:item:content:)`` is when
+    /// `item` runs. There it runs once, at initialization. Here it runs at solve
+    /// time, once the container has been measured, and again whenever the width
+    /// changes. That is the only way a text height can be correct, because it is a
+    /// function of the width.
+    ///
+    /// ```swift
+    /// LazyLayoutView(posts, layout: MasonryLayout(columns: 1)) { post, width in
+    ///     .fixedHeight(measurer.height(of: post.body, width: width))
+    /// } content: { post in
+    ///     Text(post.body).lineLimit(3)
+    /// }
+    /// ```
+    ///
+    /// ## Cost
+    ///
+    /// `item` is called for **every** element on every width change, not just the
+    /// visible ones — the layout has to place the whole collection to know how
+    /// tall the content is. With ``TextMeasurer`` that is a cache hit for anything
+    /// measured before, at about 470 ns each on device; the expensive pass is the
+    /// first one at a given width, at roughly 31 µs per item.
+    ///
+    /// That puts self-sizing text at a different scale from the rest of this
+    /// package: comfortable to about **10,000 items**, against 1,000,000 for
+    /// layouts driven by ``ItemMetric``. Above a few thousand, measure with
+    /// ``TextMeasurer/heights(of:width:chunkSize:)`` before handing the data over,
+    /// so the first pass happens off the main actor instead of inside a solve.
+    ///
+    /// ## Declaring what else invalidates a size
+    ///
+    /// The closure captures things the container cannot see. A ``TextMeasurer``
+    /// carries a font, a line limit and line spacing, none of which appear in the
+    /// elements, the ids or the layout — so when the user changes their text size,
+    /// every measured height becomes wrong while nothing the container watches has
+    /// moved.
+    ///
+    /// `recomputeOn` is that missing dependency, and it is required rather than
+    /// optional because forgetting it produces silently stale layout rather than a
+    /// compile error. For measured text, pass the style:
+    ///
+    /// ```swift
+    /// @Environment(\.fontResolutionContext) private var fontContext
+    /// @State private var measurers = TextMeasurerStore()
+    ///
+    /// let style = TextStyle(font: .body, in: fontContext, lineLimit: 3)
+    /// let measurer = measurers.measurer(for: style)
+    ///
+    /// LazyLayoutView(posts, layout: layout, recomputeOn: style) { post, width in
+    ///     .fixedHeight(measurer.height(of: post.body, width: width))
+    /// } content: { post in
+    ///     Text(post.body).font(.body).lineLimit(3)
+    /// }
+    /// ```
+    ///
+    /// ``TextStyle`` compares by value, so an equal style costs nothing — passing
+    /// it on every render does not re-measure anything.
+    ///
+    /// - Parameters:
+    ///   - data: The items to lay out.
+    ///   - id: Key path to a stable identity.
+    ///   - layout: The placement algorithm.
+    ///   - overscan: How much content to build beyond the viewport.
+    ///   - trigger: Anything outside the collection that changes what `item`
+    ///     returns. Changing it re-solves; an equal value does nothing.
+    ///   - item: The layout input for an element at a given container width.
+    ///   - content: The view for an element. Called only for on-screen items.
+    public init<Data: RandomAccessCollection>(
+        _ data: Data,
+        id: KeyPath<Element, ID>,
+        layout: Layout,
+        overscan: Overscan = .default,
+        recomputeOn trigger: some Equatable,
+        item: @escaping (Element, Double) -> Layout.Item,
+        @ViewBuilder content: @escaping (Element) -> Cell
+    ) where Data.Element == Element, Element: Equatable {
+        let elements = Array(data)
+        self.elements = elements
+        ids = elements.map { $0[keyPath: id] }
+        items = .widthAware(item)
+        changeToken = ChangeToken(
+            ids: elements.map { $0[keyPath: id] },
+            payload: AnyEquatable(ElementsAndTrigger(elements: elements, trigger: trigger)),
+            layout: layout
+        )
+        self.layout = layout
+        self.overscan = overscan
         self.content = content
         onInstrumentation = nil
     }
@@ -107,75 +285,133 @@ public struct LazyLayoutView<Element, ID: Hashable & Sendable, Layout: LazyLayou
         _ data: Data,
         id: KeyPath<Element, ID>,
         layout: Layout,
-        overscan: Double = 1,
+        overscan: Overscan = .default,
         item: (Element) -> Layout.Item,
         onInstrumentation: @escaping (LazyLayoutInstrumentationEvent) -> Void,
         @ViewBuilder content: @escaping (Element) -> Cell
     ) where Data.Element == Element {
         let elements = Array(data)
+        let mapped = elements.map(item)
         self.elements = elements
         ids = elements.map { $0[keyPath: id] }
-        items = elements.map(item)
+        items = .fixed(mapped)
+        changeToken = ChangeToken(
+            ids: elements.map { $0[keyPath: id] },
+            payload: AnyEquatable(mapped),
+            layout: layout
+        )
         self.layout = layout
-        self.overscan = max(0, overscan)
+        self.overscan = overscan
+        self.content = content
+        self.onInstrumentation = onInstrumentation
+    }
+
+    /// Instrumented width-aware initializer, for the demo's text scenarios.
+    @_spi(Instrumentation)
+    public init<Data: RandomAccessCollection>(
+        _ data: Data,
+        id: KeyPath<Element, ID>,
+        layout: Layout,
+        overscan: Overscan = .default,
+        recomputeOn trigger: some Equatable,
+        item: @escaping (Element, Double) -> Layout.Item,
+        onInstrumentation: @escaping (LazyLayoutInstrumentationEvent) -> Void,
+        @ViewBuilder content: @escaping (Element) -> Cell
+    ) where Data.Element == Element, Element: Equatable {
+        let elements = Array(data)
+        self.elements = elements
+        ids = elements.map { $0[keyPath: id] }
+        items = .widthAware(item)
+        changeToken = ChangeToken(
+            ids: elements.map { $0[keyPath: id] },
+            payload: AnyEquatable(ElementsAndTrigger(elements: elements, trigger: trigger)),
+            layout: layout
+        )
+        self.layout = layout
+        self.overscan = overscan
         self.content = content
         self.onInstrumentation = onInstrumentation
     }
 
     public var body: some View {
-        ScrollView {
-            ZStack(alignment: .topLeading) {
-                // Establishes the scrollable extent without materializing anything.
-                Color.clear
-                    .frame(width: 1, height: snapshot?.contentHeight ?? 0)
+        // The width is read from a `GeometryReader` wrapping the scroll view
+        // rather than from the scroll view itself, and the content plane is then
+        // clamped to that width. Both halves are load-bearing, and each fixes a
+        // bug the other one caused.
+        //
+        // A vertical scroll view treats its content width as a floor it will not
+        // go below. Cells are pinned to widths from the last solve, so narrowing
+        // the container deadlocks: the scroll view keeps reporting the old width
+        // because last solve's cells hold it open, so the container never
+        // re-solves, so the cells never narrow. Measured on macOS: content
+        // holding 500pt cells never reported a change to 300pt.
+        //
+        // A `GeometryReader` takes the size it is *proposed* and is unaffected by
+        // what is inside it, so it always sees the true available width. Clamping
+        // the content plane to that width then means oversized cells from the
+        // previous solve can overflow visually for one frame but can never widen
+        // the content, so the scroll view is free to narrow.
+        //
+        // The cells stay in a `ZStack`. An earlier version put them in an
+        // `overlay` on the spacer, which also stops them widening the content —
+        // but it silently broke absolute positioning, drawing masonry cells on
+        // top of each other. `WidthAndPositionTests` covers both failures.
+        GeometryReader { proxy in
+            ScrollView {
+                ZStack(alignment: .topLeading) {
+                    // Establishes the scrollable extent without materializing
+                    // anything.
+                    Color.clear
+                        .frame(width: 1, height: snapshot?.contentHeight ?? 0)
 
-                ForEach(placed) { item in
-                    // `placed` is @State and survives the parent handing this view
-                    // a new collection, but `elements` is replaced immediately
-                    // and `body` runs before the onChange handler re-solves.
-                    // A stale position would read out of bounds after a deletion
-                    // and pair an id with the wrong element after an insertion.
-                    //
-                    // Skipping the cell is safe but blanks the entire window for
-                    // one frame, because a single insertion invalidates *every*
-                    // position at once. Falling back to the element captured at
-                    // solve time keeps the right content on screen for that frame
-                    // instead — same identity, just one frame stale.
-                    let current = item.position < elements.count && ids[item.position] == item.id
-                        ? elements[item.position]
-                        : item.element
-                    content(current)
-                        .frame(width: item.frame.width, height: item.frame.height)
-                        .offset(x: item.frame.x, y: item.frame.y)
+                    ForEach(placed) { item in
+                        // `placed` is @State and survives the parent handing this
+                        // view a new collection, but `elements` is replaced
+                        // immediately and `body` runs before the onChange handler
+                        // re-solves. A stale position would read out of bounds
+                        // after a deletion and pair an id with the wrong element
+                        // after an insertion.
+                        //
+                        // Skipping the cell is safe but blanks the entire window
+                        // for one frame, because a single insertion invalidates
+                        // *every* position at once. Falling back to the element
+                        // captured at solve time keeps the right content on
+                        // screen for that frame instead — same identity, just one
+                        // frame stale.
+                        let current = item.position < elements.count && ids[item.position] == item.id
+                            ? elements[item.position]
+                            : item.element
+                        content(current)
+                            .frame(width: item.frame.width, height: item.frame.height)
+                            .offset(x: item.frame.x, y: item.frame.y)
+                    }
                 }
+                .frame(width: proxy.size.width, alignment: .topLeading)
             }
-            .frame(maxWidth: .infinity, alignment: .topLeading)
-        }
-        .scrollPosition($scrollPosition)
-        .onScrollGeometryChange(for: LayoutRect.self) { geometry in
-            LayoutRect(
-                x: 0,
-                y: geometry.contentOffset.y + geometry.contentInsets.top,
-                width: geometry.containerSize.width,
-                height: geometry.containerSize.height
-            )
-        } action: { _, new in
-            viewport = new
-            onInstrumentation?(.viewport(offsetY: new.y))
-            updateWindow()
-        }
-        .onGeometryChange(for: Double.self) { proxy in
-            proxy.size.width
-        } action: { width in
-            guard width > 0, width != containerWidth else { return }
-            containerWidth = width
-            resolve(anchored: false)
-        }
-        // One trigger, not three: ids, metrics and layout configuration very
-        // often change together, and three separate handlers would run two or
-        // three full solves for a single mutation.
-        .onChange(of: ResolutionInput(ids: ids, items: items, layout: layout)) { _, _ in
-            resolve(anchored: true)
+            .scrollPosition($scrollPosition)
+            .onScrollGeometryChange(for: LayoutRect.self) { geometry in
+                LayoutRect(
+                    x: 0,
+                    y: geometry.contentOffset.y + geometry.contentInsets.top,
+                    width: geometry.containerSize.width,
+                    height: geometry.containerSize.height
+                )
+            } action: { _, new in
+                viewport = new
+                onInstrumentation?(.viewport(offsetY: new.y))
+                updateWindow()
+            }
+            .onChange(of: proxy.size.width, initial: true) { _, width in
+                guard width > 0, width != containerWidth else { return }
+                containerWidth = width
+                resolve(anchored: false)
+            }
+            // One trigger, not three: ids, metrics and layout configuration very
+            // often change together, and three separate handlers would run two or
+            // three full solves for a single mutation.
+            .onChange(of: changeToken) { _, _ in
+                resolve(anchored: true)
+            }
         }
     }
 
@@ -187,9 +423,18 @@ public struct LazyLayoutView<Element, ID: Hashable & Sendable, Layout: LazyLayou
         let anchor = anchored ? previous?.anchor(in: viewport) : nil
 
         let state = Signposts.signposter.beginInterval(Signposts.solve)
+        // For the width-aware path this is where the item closure runs, and for
+        // text it is where measurement happens. It is timed separately and
+        // included in the total: on a cold cache it is the single largest
+        // component of a solve, and a "total" that omitted it would under-report
+        // exactly the number this instrumentation exists to capture.
+        var resolvedItems: [Layout.Item]!
+        let itemsDuration = ContinuousClock().measure {
+            resolvedItems = items.resolve(for: elements, containerWidth: containerWidth)
+        }
         var result: LazyLayoutResult!
         let layoutDuration = ContinuousClock().measure {
-            result = layout.layout(items: items, containerWidth: containerWidth)
+            result = layout.layout(items: resolvedItems, containerWidth: containerWidth)
         }
         var next: LayoutSnapshot<ID>!
         let snapshotDuration = ContinuousClock().measure {
@@ -198,9 +443,10 @@ public struct LazyLayoutView<Element, ID: Hashable & Sendable, Layout: LazyLayou
         Signposts.signposter.endInterval(Signposts.solve, state)
         onInstrumentation?(
             .solve(
+                items: itemsDuration,
                 layout: layoutDuration,
                 snapshot: snapshotDuration,
-                total: layoutDuration + snapshotDuration
+                total: itemsDuration + layoutDuration + snapshotDuration
             )
         )
         snapshot = next
@@ -251,18 +497,24 @@ public struct LazyLayoutView<Element, ID: Hashable & Sendable, Layout: LazyLayou
 
     private func updateWindow() {
         guard let snapshot else { return }
-        let height = viewport.height > 0 ? viewport.height : 900
-        let margin = height * overscan
-        let window = LayoutRect(
-            x: 0,
-            y: viewport.y - margin,
-            width: containerWidth,
-            height: height + margin * 2
-        )
+        // Before the scroll view reports geometry there is no viewport to widen,
+        // so assume a plausible phone height rather than building nothing.
+        let measured = viewport.height > 0
+            ? viewport
+            : LayoutRect(x: 0, y: viewport.y, width: containerWidth, height: 900)
 
         let state = Signposts.signposter.beginInterval(Signposts.visibility)
         var positions: [Int] = []
+        // Window resolution is inside the interval. For `.screens` it is
+        // arithmetic and costs nothing; for `.items` it is a bisection over a
+        // dozen visibility queries, and excluding it would make the reported
+        // query cost a small fraction of the work actually done.
         let duration = ContinuousClock().measure {
+            let window = snapshot.window(
+                for: measured,
+                overscan: overscan,
+                containerWidth: containerWidth
+            )
             positions = snapshot.visibleItems(in: window)
         }
         Signposts.signposter.endInterval(Signposts.visibility, state)
@@ -291,10 +543,32 @@ public extension LazyLayoutView where Element: Identifiable, ID == Element.ID {
     init<Data: RandomAccessCollection>(
         _ data: Data,
         layout: Layout,
-        overscan: Double = 1,
+        overscan: Overscan = .default,
         item: (Element) -> Layout.Item,
         @ViewBuilder content: @escaping (Element) -> Cell
     ) where Data.Element == Element {
         self.init(data, id: \.id, layout: layout, overscan: overscan, item: item, content: content)
+    }
+
+    /// Convenience for `Identifiable` elements whose sizes depend on the
+    /// container width — see
+    /// the width-aware initializer.
+    init<Data: RandomAccessCollection>(
+        _ data: Data,
+        layout: Layout,
+        overscan: Overscan = .default,
+        recomputeOn trigger: some Equatable,
+        item: @escaping (Element, Double) -> Layout.Item,
+        @ViewBuilder content: @escaping (Element) -> Cell
+    ) where Data.Element == Element, Element: Equatable {
+        self.init(
+            data,
+            id: \.id,
+            layout: layout,
+            overscan: overscan,
+            recomputeOn: trigger,
+            item: item,
+            content: content
+        )
     }
 }

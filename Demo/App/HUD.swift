@@ -74,14 +74,16 @@ struct LiveStatsBar: View {
                     }
                     GridRow {
                         reading("solve ×\(diagnostics.solveCount)", String(format: "%.2f", diagnostics.lastTotalSolveMs))
+                        // Item resolution: for the Feed scenario this is text
+                        // measurement, and on a cold cache it dominates the solve.
+                        reading("items", String(format: "%.2f", diagnostics.lastItemsMs))
                         reading("layout", String(format: "%.2f", diagnostics.lastLayoutMs))
                         reading("snapshot", String(format: "%.2f", diagnostics.lastSnapshotMs))
-                        reading("hz", String(format: "%.0f", diagnostics.refreshHz))
                     }
                     GridRow {
                         reading("range", "\(diagnostics.visibleLow)–\(diagnostics.visibleHigh)")
                         reading("scrolled", String(format: "%.1fk", diagnostics.scrollY / 1000))
-                        Color.clear.frame(height: 1)
+                        reading("hz", String(format: "%.0f", diagnostics.refreshHz))
                         Color.clear.frame(height: 1)
                     }
                 }
