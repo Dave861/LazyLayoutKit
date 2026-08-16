@@ -4,6 +4,96 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-08-16
+
+### Added
+
+- **Programmatic scrolling by stable id.** `LazyLayoutPosition` is a value type
+  held in `@State` and passed to the container as a binding, with
+  `scrollTo(id:anchor:)` and an `init(initiallyScrolledTo:)` for deep links.
+
+  This is not a wrapper around SwiftUI's `ScrollPosition`. Its id targeting finds
+  the *view* with that identity, and in a virtualized container the item being
+  named usually has no view — so there is nothing to find. The id is resolved
+  through the layout instead: `LayoutSnapshot.frame(of:)` already knows where the
+  item is, because that was arithmetic done before any view existed.
+
+  The offset math is public and framework-free —
+  `LayoutSnapshot.offset(toShow:anchor:viewportHeight:currentOffset:)` and
+  `ScrollAnchor` — so a scroll offset can be computed and tested without
+  rendering anything.
+
+  Requests carry a token from a process-wide counter rather than a per-instance
+  one. A per-instance count collides: replacing a position with a fresh instance —
+  the natural way to reset scroll state for a new context — restarts it low, and a
+  container that had already serviced that number would ignore the new request
+  silently. `MacRuntimeScrollTests` pins this.
+
+  A container **ignores any request made before it existed**. Servicing a request
+  does not clear it, and nothing is read back, so the target a position holds is
+  the last thing the caller asked for rather than where the user is — a container
+  created fresh against a well-used position would otherwise jump to a target
+  satisfied long ago, on every tab switch or `.id()` change. Tokens are monotonic,
+  so "made before I existed" is an exact test, recorded when the container's state
+  is created. `init(initiallyScrolledTo:)` is the deliberate exception.
+
+  This is where the comparison to `ScrollPosition` stops: that type updates its
+  `viewID` as the user scrolls and can restore a position. `LazyLayoutPosition`
+  reads nothing back and cannot, so re-applying its target would not be
+  restoration.
+
+  Behaviour worth knowing: a request is **held** while nothing has been laid out
+  yet, which is what makes a deep link fired before an async load work, and
+  **dropped** once a non-empty snapshot still lacks the id, so it cannot fire
+  much later when an unrelated change happens to introduce that id. Re-issuing
+  always re-fires, including for an id already requested — which is what makes a
+  "back to top" button work the second time it is pressed.
+
+  A jump replaces the entire materialized window in one pass rather than after a
+  scroll-geometry round trip. That means an entire window of cells is constructed
+  in a single frame, which on an expensive cell will be visible; no device
+  measurement of that is published here.
+
+  The handle is write-only. Reporting the visible item back would mean the
+  container writing through the caller's binding, which invalidates the caller's
+  view and re-runs the container's O(n) initializer — on the scroll path.
+- **`JustifiedLayout`**, the Photos/Flickr arrangement: aspect ratios preserved,
+  every completed row filling the container width. Configurable target row
+  height, horizontal and vertical spacing, and a last-row policy of `.natural` or
+  `.justified`.
+
+  It is the layout a grid genuinely cannot express, since the number of items in
+  a row is a result of the content rather than a configured column count.
+  Placement is one O(n) pass over the items — the same complexity as masonry, by
+  inspection. No timing claim is made for it: every device figure in this project
+  was measured with `MasonryLayout`, and none has been re-run for this layout.
+
+  Rows close greedily and keep the item that overflowed, so a completed row is
+  never taller than the target — and a single very wide image can pull its own
+  row below it. The one-item look-back that would fix that is not implemented;
+  it reopens the following row for a second decision for a purely aesthetic gain.
+
+  Aspect ratios are clamped to 0.05–20 and `.fixedHeight` is treated as square.
+  The clamp is load-bearing rather than cosmetic: row height is
+  `available / Σratios`, so one absurd ratio drives its whole row to zero height,
+  and a zero-height frame intersects no viewport — meaning one bad input would
+  silently delete every other item beside it.
+
+### Notes
+
+No new device-performance figures were collected. The layout algorithms, the
+visibility index and the steady-state visibility-query path are unchanged, so
+0.2.0's measurements stand as they are rather than being restated for a release
+that did not re-run them.
+
+The solve path is *not* among the unchanged: every solve now also reads the scroll
+binding and does token bookkeeping before anchoring. That is a handful of integer
+comparisons against work already measured in milliseconds, and it is not on the
+per-frame scrolling path — but it is a change, and calling the solve path
+untouched would be wrong.
+
+Animated mutations and horizontal scrolling remain out of scope.
+
 ## [0.2.0] - 2026-08-08
 
 ### Added

@@ -52,6 +52,35 @@ struct ScenarioView: View {
             .padding(.horizontal, 12)
             .frame(maxWidth: model.isNarrowed ? 260 : .infinity)
             .id(scenarioIdentity)
+        case .justified:
+            LazyLayoutView(
+                model.items,
+                id: \.id,
+                layout: model.justified,
+                overscan: model.overscan.resolved,
+                item: { $0.metric },
+                onInstrumentation: {
+                    if isActive {
+                        diagnostics.record($0)
+                    }
+                }
+            ) { item in
+                DemoCell(index: item.id)
+            }
+            .padding(.horizontal, 12)
+            .frame(maxWidth: model.isNarrowed ? 260 : .infinity)
+            .id(scenarioIdentity)
+        case .navigate:
+            NavigateScenario(
+                model: model,
+                diagnostics: diagnostics,
+                isActive: isActive,
+                identity: scenarioIdentity
+            )
+            .padding(.horizontal, 12)
+            .frame(maxWidth: model.isNarrowed ? 260 : .infinity)
+        // Masonry and the two baselines. Anything added to `Mode` needs its own
+        // case above, or it silently renders as masonry.
         default:
             LazyLayoutView(
                 model.items,
@@ -524,5 +553,98 @@ private struct FeedCell: View {
         .padding(Self.padding)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(.quaternary.opacity(0.35), in: .rect(cornerRadius: 12))
+    }
+}
+
+/// Programmatic scrolling by id.
+///
+/// The point of the scenario is that the destination is almost never on screen:
+/// at a million items, jumping to the end means resolving an id whose cell has
+/// never been built, and the container gets there in one pass.
+struct NavigateScenario: View {
+    let model: DemoModel
+    let diagnostics: Diagnostics
+    let isActive: Bool
+    /// Applied to the container, not to this view. The position has to outlive a
+    /// dataset change — putting this view inside the `.id()` would silently drop
+    /// a *pending* request every time the item count changed, which looks exactly
+    /// like a bug in the feature.
+    ///
+    /// The container rebuilt by an `.id()` change starts at the top rather than
+    /// re-applying the last target, since that request predates it — so switching
+    /// item counts does not land on whatever id was last typed here.
+    let identity: String
+
+    @State private var position = LazyLayoutPosition<Int>()
+    @State private var target = ""
+
+    private var count: Int {
+        model.items.count
+    }
+
+    var body: some View {
+        VStack(spacing: 8) {
+            controls
+            LazyLayoutView(
+                model.items,
+                id: \.id,
+                layout: model.justified,
+                overscan: model.overscan.resolved,
+                position: $position,
+                item: { $0.metric },
+                onInstrumentation: {
+                    if isActive {
+                        diagnostics.record($0)
+                    }
+                }
+            ) { item in
+                DemoCell(index: item.id)
+            }
+            .id(identity)
+        }
+        .onChange(of: identity) { _, _ in
+            // Only the text field. The container re-created by the `.id()` change
+            // ignores the previous target on its own, because that request was
+            // made before it existed.
+            target = ""
+        }
+    }
+
+    private var controls: some View {
+        VStack(spacing: 6) {
+            HStack(spacing: 8) {
+                Button("Top") { jump(to: 0) }
+                Button("Middle") { jump(to: count / 2) }
+                Button("End") { jump(to: max(0, count - 1)) }
+                Button("Random") { jump(to: Int.random(in: 0 ..< max(1, count))) }
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+
+            HStack(spacing: 8) {
+                TextField("id", text: $target)
+                    .textFieldStyle(.roundedBorder)
+                    .keyboardType(.numberPad)
+                    .frame(maxWidth: 120)
+                // Centring is where the difference from a grid shows: the item has
+                // to be placed relative to the viewport, not just scrolled past.
+                Button("Center") {
+                    if let id = Int(target) {
+                        position.scrollTo(id: id, anchor: .center)
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                Text("of \(count)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.top, 4)
+    }
+
+    private func jump(to id: Int) {
+        target = "\(id)"
+        position.scrollTo(id: id, anchor: .top)
     }
 }

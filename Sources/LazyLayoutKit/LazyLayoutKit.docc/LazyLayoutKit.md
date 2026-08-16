@@ -47,7 +47,14 @@ advance — but it is *computable* in advance. See <doc:MeasuringText>.
 ### Layouts in the box
 
 - ``MasonryLayout``
+- ``JustifiedLayout``
 - ``TimelineLayout``
+
+### Scrolling to an item
+
+- <doc:ScrollingToAnItem>
+- ``LazyLayoutPosition``
+- ``ScrollAnchor``
 
 ### Self-sizing text
 

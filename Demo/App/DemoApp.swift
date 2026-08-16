@@ -8,7 +8,7 @@ struct DemoApp: App {
 }
 
 enum AppTab: Hashable {
-    case gallery, timeline, feed, baselines, results
+    case gallery, justified, navigate, timeline, feed, baselines, results
 }
 
 struct RootView: View {
@@ -30,6 +30,28 @@ struct RootView: View {
                     // screen still solves — and without this its numbers land in
                     // the shared diagnostics and are read as the visible tab's.
                     isActive: tab == .gallery
+                )
+            }
+
+            Tab("Justified", systemImage: "rectangle.grid.2x2", value: .justified) {
+                ScenarioView(
+                    title: "Justified",
+                    mode: .justified,
+                    model: model,
+                    diagnostics: diagnostics,
+                    runner: runner,
+                    isActive: tab == .justified
+                )
+            }
+
+            Tab("Deep link", systemImage: "arrow.down.to.line", value: .navigate) {
+                ScenarioView(
+                    title: "Deep link",
+                    mode: .navigate,
+                    model: model,
+                    diagnostics: diagnostics,
+                    runner: runner,
+                    isActive: tab == .navigate
                 )
             }
 

@@ -81,11 +81,25 @@ public protocol LazyLayoutAlgorithm: Equatable, Sendable {
 
 **Scroll position** is anchored on your item identity, never on index. Insert one item at the front and every index shifts — anchor by index and you'd silently be holding a different item still.
 
-## Two layouts in the box
+## Three layouts in the box
 
 **`MasonryLayout`** — fixed columns, each item dropped into whichever is shortest.
 
+**`JustifiedLayout`** — Photos/Flickr rows: aspect ratios preserved, every completed row filling the width.
+
 **`TimelineLayout`** — intervals on a vertical time axis, overlapping ones split into lanes.
+
+Justified is the one a grid genuinely cannot express. `LazyVGrid` has to know its columns before it sees the content; here the number of items in a row is a *result* of the content, since how many wide shots happen to land together decides where the row breaks.
+
+```swift
+LazyLayoutView(photos, layout: JustifiedLayout(targetRowHeight: 200)) { photo in
+    .aspectRatio(photo.width / photo.height)
+} content: { photo in
+    PhotoCell(photo)
+}
+```
+
+Rows close greedily: items are added until the row is no taller than the target, and the item that tipped it over stays. So a completed row is never taller than `targetRowHeight`, and one panorama can pull its own row below it. The trailing row keeps the target height by default, or set `lastRow: .justified` to stretch it.
 
 Timeline is there to keep the protocol honest. Its items overlap vertically and its frames aren't monotonic in y in item order, so anything that had quietly assumed masonry's shape breaks on it. There's a test asserting exactly that.
 
@@ -94,6 +108,31 @@ Timeline is there to keep the protocol honest. Its items overlap vertically and 
 </p>
 
 Both are written against the same public protocol you would use — about 60 and 90 lines each. Writing your own is the point.
+
+## Scrolling to an item
+
+```swift
+@State private var position = LazyLayoutPosition<Photo.ID>()
+
+LazyLayoutView(photos, layout: JustifiedLayout(), position: $position) { photo in
+    .aspectRatio(photo.aspectRatio)
+} content: { photo in
+    PhotoCell(photo)
+}
+.toolbar {
+    Button("Jump to today") { position.scrollTo(id: today.id, anchor: .center) }
+}
+```
+
+**This is not a wrapper around SwiftUI's `ScrollPosition`.** Its id targeting looks for the *view* with that identity, and in a virtualized container the item you are naming almost certainly has no view — so there is nothing to find. This resolves the id through the layout instead: `LayoutSnapshot.frame(of:)` knows where item 900,000 is because that was arithmetic done before any view existed, and turning a frame into an offset is a subtraction. Both of those are public, so you can compute and test an offset yourself without rendering anything.
+
+Anchors are `.top`, `.center`, `.bottom`, and `.nearest` — which does nothing at all if the item is already fully visible, and otherwise makes the smallest move that brings it in. Offsets are clamped, so centring the first item pins to the top rather than scrolling above the content.
+
+`LazyLayoutPosition(initiallyScrolledTo:)` opens *at* an item rather than opening at the top and jumping, and survives the data arriving later — while the collection is empty the request is held, not dropped. Once something has been laid out, a request for an id that is not in it *is* dropped, so it cannot fire minutes later when an unrelated change happens to introduce that id. Re-issue when your page lands; calling `scrollTo` again always re-fires.
+
+**A request is not a record of where the user is.** The target a position holds is the last thing you asked for, not where the collection ended up — the moment the user scrolls, the two diverge. That's the real difference from `ScrollPosition`, which updates its `viewID` as the user scrolls and so can genuinely restore a position; this can't, and doesn't pretend to. Consequently a container ignores any request made before it existed rather than jumping to a stale target on every tab switch or `.id()` change. Use `LazyLayoutPosition(initiallyScrolledTo:)` when you do want a fresh container to open at an item.
+
+The handle is write-only in 0.3: no read-back of the visible item, because that would mean the container writing through your binding and re-running its O(n) initializer on the scroll path.
 
 ## Writing your own layout
 
@@ -149,7 +188,7 @@ Builds with any Xcode from 16 onwards. **`TextStyle(font:in:)` — the SwiftUI `
 
 
 ```swift
-.package(url: "https://github.com/Dave861/LazyLayoutKit.git", from: "0.2.0")
+.package(url: "https://github.com/Dave861/LazyLayoutKit.git", from: "0.3.0")
 ```
 
 ## Is it fast?
@@ -250,16 +289,19 @@ Three things worth knowing before you reach for it:
 
 `minimumScaleFactor` is not supported, and won't be: shrink-to-fit is a measure-then-shrink loop, which is exactly the lifecycle this package doesn't implement.
 
-## What is not in 0.2.0
+## What is not in 0.3.0
 
 Narrow beats vague. Each of these is missing because doing it properly is real work, not because it was forgotten.
 
 - **Vertical scrolling only.** Place items anywhere across the width you like, but the scroll axis and the index are y. Two-axis canvases need a different index.
 - **No measure-and-correct pass.** Sizes are computed before layout, never observed from rendered views and reconciled afterwards. `ItemMetric` still has no `.estimated` or `.measured` case, because it still doesn't do that. Self-sizing text works by making the height computable in advance, not by relaxing this.
 - **Text is `String` plus one style.** Attributed text with mixed fonts per run isn't modelled, because mixed runs change line height per line.
-- **No animated insertion or removal.** Changes are applied correctly and preserve scroll position, but they don't animate.
+- **No animated insertion or removal.** Changes are applied correctly and preserve scroll position, but they don't animate. Programmatic scrolls are immediate for the same reason: animating across content that was never built would animate through blank space.
+- **Scroll requests are write-only.** You can say where to go; the container doesn't report back where it is. A request for an id that isn't in an already-laid-out collection is dropped rather than held.
 - **Exact, eager snapshots.** Every frame is computed up front, so unbounded collections are out of scope.
 - **No custom query overrides.** One index, package-owned. A capability protocol for layouts that can do better waits until a real layout proves it needs one.
+
+**One quirk worth knowing about justified:** a completed row is never taller than the target height, so a single very wide image can pull its row well below it. The usual refinement — reconsider the row without that item — is not implemented, because it reopens the next row for a second decision for a purely aesthetic gain.
 
 **One quirk worth knowing about masonry:** placement is a fold, so inserting an item or resizing one can change which *column* every later item lands in. Your scroll position is preserved — the container anchors on identity — but content will visibly reflow. That's masonry, not a bug. A fixed grid doesn't do it.
 
@@ -319,6 +361,8 @@ Signposts under subsystem `com.lazylayoutkit`, category `layout`, with two inter
 Signpost names are treated as API, renaming one invalidates anyone's saved template.
 
 ## Status
+
+0.3.0 adds programmatic scrolling by id and a justified gallery layout. Neither publishes a new device measurement: the steady scrolling and index path is unchanged, so 0.2's numbers stand as they are rather than being restated for a release that did not re-measure them.
 
 0.2.0 adds self-sizing text and a cell-count overscan unit. Every performance figure here is measured on an iPhone 14 Pro rather than extrapolated from a Mac, and the limitations are measured too — including a dense-timeline case that neither 0.1 nor 0.2 handles smoothly, and an earlier 0.1 measurement that turned out not to be reproducible by 0.1's own binary.
 

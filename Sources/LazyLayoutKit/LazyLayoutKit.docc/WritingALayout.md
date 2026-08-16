@@ -98,4 +98,5 @@ usual. See <doc:MeasuringText>.
 ### Reference implementations
 
 - ``MasonryLayout``
+- ``JustifiedLayout``
 - ``TimelineLayout``

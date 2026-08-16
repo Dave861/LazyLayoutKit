@@ -33,6 +33,11 @@ enum Mode: String, CaseIterable, Identifiable, Sendable {
     /// Self-sizing text: heights measured with CoreText at solve time rather
     /// than supplied by the caller.
     case feed = "Feed"
+    /// Rows that preserve aspect ratios and fill the width — the layout a grid
+    /// cannot express, because the row size is a result of the content.
+    case justified = "Justified"
+    /// Programmatic scrolling: jump to an item by id, materialized or not.
+    case navigate = "Deep link"
 
     var id: String {
         rawValue
@@ -45,6 +50,8 @@ enum Mode: String, CaseIterable, Identifiable, Sendable {
         case .lazyStack: "list.bullet"
         case .eager: "exclamationmark.triangle.fill"
         case .feed: "text.alignleft"
+        case .justified: "rectangle.grid.2x2"
+        case .navigate: "arrow.down.to.line"
         }
     }
 
@@ -55,6 +62,8 @@ enum Mode: String, CaseIterable, Identifiable, Sendable {
         case .lazyStack: "Apple baseline · fixed geometry"
         case .eager: "Every subview built up front"
         case .feed: "LazyLayoutKit · measured text"
+        case .justified: "LazyLayoutKit · rows fill the width"
+        case .navigate: "LazyLayoutKit · scroll to any id"
         }
     }
 
@@ -198,6 +207,11 @@ final class DemoModel {
     /// One column, because the feed scenario is about height varying per item.
     let feedLayout = MasonryLayout(columns: 1, spacing: 10)
     let timeline = TimelineLayout(pointsPerUnit: 3, laneSpacing: 8, minimumHeight: 44)
+    let justified = JustifiedLayout(
+        targetRowHeight: 200,
+        horizontalSpacing: 6,
+        verticalSpacing: 6
+    )
 
     init() {
         regenerate()
