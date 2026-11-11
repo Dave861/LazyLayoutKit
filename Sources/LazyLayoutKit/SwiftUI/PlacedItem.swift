@@ -27,18 +27,21 @@ extension LayoutSnapshot {
         ids currentIDs: [ID],
         previous: [PlacedItem<ID, Element>]
     ) -> [PlacedItem<ID, Element>] {
-        var earlier: [ID: Element]?
+        var previousElements: [ID: Element]?
         return positions.compactMap { position in
-            let id = ids[position]
+            let id = self.ids[position]
             let element: Element
             if position < currentIDs.count, currentIDs[position] == id {
                 element = elements[position]
             } else {
-                if earlier == nil {
-                    earlier = Dictionary(previous.map { ($0.id, $0.element) }, uniquingKeysWith: { first, _ in first })
+                if previousElements == nil {
+                    previousElements = Dictionary(
+                        previous.map { ($0.id, $0.element) },
+                        uniquingKeysWith: { first, _ in first }
+                    )
                 }
-                guard let placed = earlier?[id] else { return nil }
-                element = placed
+                guard let fallback = previousElements?[id] else { return nil }
+                element = fallback
             }
             return PlacedItem(id: id, position: position, frame: frames[position], element: element)
         }

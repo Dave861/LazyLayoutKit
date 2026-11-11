@@ -49,10 +49,8 @@ struct StaleWindowTests {
         let shrunk = items([0, 1, 2, 3, 5])
         let stale = placeWindow(of: snapshot, over: shrunk, previous: window)
 
-        for placed in stale {
-            #expect(placed.element.id == placed.id)
-        }
-        #expect(stale.map(\.element) == items(Array(0 ..< 6)).filter { stale.map(\.id).contains($0.id) })
+        #expect(stale.map(\.id) == Array(0 ..< 6))
+        #expect(stale.map(\.element) == items(Array(0 ..< 6)))
     }
 
     @Test("an id whose position now holds another element keeps the element it was placed with")
