@@ -4,6 +4,22 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] - 2026-11-11
+
+### Fixed
+
+- **A crash when the collection shrinks while the container is being laid out.**
+  `updateWindow()` read `elements[position]` for every position in the window,
+  and it runs from the scroll geometry action as well as after a solve. That
+  action can fire with a freshly handed-in collection before
+  `onChange(of: changeToken)` re-solves — a navigation pop laying the container
+  out does exactly that — so a position from the old snapshot could index past
+  the end of the new collection. `body` already guarded the same read; the window
+  now does too, through `LayoutSnapshot.place(_:elements:ids:previous:)`, which
+  trusts a position only where the current collection holds the same id, falls
+  back to the element the item was last placed with, and otherwise leaves the
+  item out until the re-solve. `StaleWindowTests` pins it.
+
 ## [0.3.0] - 2026-08-16
 
 ### Added

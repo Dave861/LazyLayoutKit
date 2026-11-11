@@ -139,7 +139,7 @@ public struct LazyLayoutView<Element, ID: Hashable & Sendable, Layout: LazyLayou
     @State private var snapshot: LayoutSnapshot<ID>?
     @State private var containerWidth: Double = 0
     @State private var viewport = LayoutRect(x: 0, y: 0, width: 0, height: 0)
-    @State private var placed: [Placed] = []
+    @State private var placed: [PlacedItem<ID, Element>] = []
     @State private var scrollPosition = ScrollPosition(idType: ID.self)
     @State private var hasWarnedAboutDuplicates = false
     /// The last ``LazyLayoutPosition/token`` taken from the binding. Zero means
@@ -156,16 +156,6 @@ public struct LazyLayoutView<Element, ID: Hashable & Sendable, Layout: LazyLayou
     /// state is set up — before any `onChange` can run — which is what makes this
     /// an exact "when was I born" marker rather than a racy one.
     @State private var birthToken: UInt64 = currentScrollRequestToken()
-
-    private struct Placed: Identifiable {
-        let id: ID
-        let position: Int
-        let frame: LayoutRect
-        /// The element as of the last solve. Used only as a fallback for the one
-        /// frame between a collection mutation and the re-solve, when positions
-        /// no longer address the new collection.
-        let element: Element
-    }
 
     /// - Parameters:
     ///   - data: The items to lay out.
@@ -686,14 +676,7 @@ public struct LazyLayoutView<Element, ID: Hashable & Sendable, Layout: LazyLayou
             )
         )
 
-        placed = positions.map {
-            Placed(
-                id: snapshot.ids[$0],
-                position: $0,
-                frame: snapshot.frames[$0],
-                element: elements[$0]
-            )
-        }
+        placed = snapshot.place(positions, elements: elements, ids: ids, previous: placed)
     }
 }
 
