@@ -188,7 +188,7 @@ Builds with any Xcode from 16 onwards. **`TextStyle(font:in:)` — the SwiftUI `
 
 
 ```swift
-.package(url: "https://github.com/Dave861/LazyLayoutKit.git", from: "0.3.0")
+.package(url: "https://github.com/Dave861/LazyLayoutKit.git", from: "0.3.1")
 ```
 
 ## Is it fast?
@@ -289,7 +289,7 @@ Three things worth knowing before you reach for it:
 
 `minimumScaleFactor` is not supported, and won't be: shrink-to-fit is a measure-then-shrink loop, which is exactly the lifecycle this package doesn't implement.
 
-## What is not in 0.3.0
+## What is not in 0.3.1
 
 Narrow beats vague. Each of these is missing because doing it properly is real work, not because it was forgotten.
 
@@ -361,6 +361,8 @@ Signposts under subsystem `com.lazylayoutkit`, category `layout`, with two inter
 Signpost names are treated as API, renaming one invalidates anyone's saved template.
 
 ## Status
+
+0.3.1 fixes a crash when the collection shrinks while the container is being laid out, such as during a navigation pop. There are no API or performance changes.
 
 0.3.0 adds programmatic scrolling by id and a justified gallery layout. Neither publishes a new device measurement: the steady scrolling and index path is unchanged, so 0.2's numbers stand as they are rather than being restated for a release that did not re-measure them.
 
