@@ -1,5 +1,5 @@
-import SwiftUI
 @_spi(Instrumentation) import LazyLayoutKit
+import SwiftUI
 
 /// One scrollable scenario, in a standard navigation stack: title, toolbar,
 /// and the live stats attached as a bottom safe-area inset rather than floating

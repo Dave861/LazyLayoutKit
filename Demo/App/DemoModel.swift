@@ -1,7 +1,7 @@
 import Foundation
+@_spi(Instrumentation) import LazyLayoutKit
 import Observation
 import SwiftUI
-@_spi(Instrumentation) import LazyLayoutKit
 
 struct DemoItem: Identifiable, Equatable, Sendable {
     let id: Int
